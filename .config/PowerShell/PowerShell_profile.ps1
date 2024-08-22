@@ -24,19 +24,20 @@ if ($host.Name -eq 'ConsoleHost') {
     Import-Module DirColors
     Import-Module Terminal-Icons
     Import-Module PSWriteColor
+    Import-Module PSReadLine
     Import-Module z
     Import-Module PwshComplete
     Import-Module DockerCompletion
     Import-Module PSFzf
     # PSReadLine
-    Set-PSReadLineOption -PredictionSource History
-    Set-PSReadLineOption -PredictionViewStyle ListView
-    Set-PSReadLineOption -EditMode Windows
-    Set-PSReadLineOption -HistorySearchCursorMovesToEnd
+    Set-PSReadLineOption -PredictionSource HistoryAndPlugin
+    Set-PSReadLineOption -PredictionViewStyle ListView 
+    Set-PSReadLineOption -EditMode Windows 
+    Set-PSReadLineOption -HistorySearchCursorMovesToEnd 
     Set-PSReadLineOption -ShowToolTips
-    Set-PSReadlineKeyHandler -Key Tab -Function MenuComplete # Complete
-    Set-PSReadLineKeyHandler -Key UpArrow -Function HistorySearchBackward
-    Set-PSReadLineKeyHandler -Key DownArrow -Function HistorySearchForward
+    Set-PSReadlineKeyHandler -Key Tab -Function MenuComplete 
+    Set-PSReadlineKeyHandler -Key UpArrow -Function HistorySearchBackward 
+    Set-PSReadlineKeyHandler -Key DownArrow -Function HistorySearchForward
     # Set-PSReadLineKeyHandler -Key Tab -ScriptBlock { Invoke-FzfTabCompletion }
     Set-PsFzfOption -PSReadlineChordProvider 'Ctrl+t' -PSReadlineChordReverseHistory 'Ctrl+r'
     $env:FZF_DEFAULT_COMMAND = 'fd --type f --hidden --follow --exclude .git'
@@ -51,15 +52,12 @@ if ($host.Name -eq 'ConsoleHost') {
     $env:FZF_ALT_C_COMMAND = 'fd --type d . --color=always --hidden'
     $env:FZF_ALT_C_OPTS = "--preview 'tree -C {} | head -50'"
     oh-my-posh.exe --init --shell pwsh | Invoke-Expression #--config "$env:POSH_THEMES_PATH\1_shell.omp.json"
-
     if ((Get-Command "$env:MINGW\vim.exe" -EA Silently )) { set-alias vi "$env:MINGW\vim.exe" }
     if ((Get-Command "$env:MINGW\ssh.exe" -EA Silently )) { set-alias ssh "$env:MINGW\ssh.exe" }
-    if ((Get-Command "$env:XDG_APP\Notepad++\Notepad++.exe" -EA Silently ))
-    { set-alias notepad "$env:XDG_APP\Notepad++\Notepad++.exe" }
-    if ((Get-Command "$env:XDG_APP\bin\unvcviewer.exe" -EA Silently ))
-    { set-alias vnc "$env:XDG_APP\bin\unvcviewer.exe" }
-}
+    if ((Get-Command "$env:XDG_APP\Notepad++\Notepad++.exe" -EA Silently )){ set-alias notepad "$env:XDG_APP\Notepad++\Notepad++.exe" }
+    if ((Get-Command "$env:XDG_APP\uvnc\uvnc.exe" -EA Silently )) { set-alias uvnc "$env:XDG_APP\uvnc\uvnc.exe" }
 
+}
 
 # function ssh-
 #     param(
@@ -84,17 +82,71 @@ if ($host.Name -eq 'ConsoleHost') {
 # Write-Host $arg2
 # }
 
-function ssh ($arg1) {
-    $ips = [System.Net.Dns]::GetHostAddresses($arg1)[0]
-    ssh -t $ips
+function CheckConnectSsh () {
+    param ( 
+	[string]$RemoteHost,
+	[string]$RemotePort='22'  
+	)
+	begin {
+		# if ( $RemotePort )
+        # { Write-Host Test-Connection $RemoteHost -IPv4 -ResolveDestination -Count 1 -TcpPort $RemotePort -ErrorAction Stop } 
+		# else { Write-Host Test-Connection $RemoteHost -IPv4 -ResolveDestination -Count 1 -ErrorAction Stop }
+	}
+	process {
+		if ( ([bool]( $RemoteHost -as [ipaddress])) `
+			-or ([bool]( $RemoteHost -match '^\w+-\w+$')) `
+			-or ([bool]( $RemoteHost -match '^\w+.\w+$')) ){
+				# Write-Host $exec  
+			try {
+				$connect = Test-Connection $RemoteHost -IPv4 -ResolveDestination -Count 1 -ErrorAction Stop | select Destination,DisplayAddress
+				if ( $RemotePort ){	
+						if ( Test-Connection $connect.Destination -IPv4 -Count 1 -TcpPort $RemotePort -ErrorAction Stop )
+							{ return @( $connect.Destination, $RemotePort )	}	
+						if ( Test-Connection $connect.DisplayAddress -IPv4 -Count 1 -TcpPort $RemotePort -ErrorAction Stop )
+							{ return @( $connect.DisplayAddress, $RemotePort ) }	
+					}
+				if ( $connect.Destination ){ return $connect.Destination, '0' }
+				if ( $connect.DisplayAddress ){ return $connect.DisplayAddress, '0' }
+			} 
+			catch { 
+				Write-Error "Not connected $RemoteHost $RemotePort" 
+				break
+			}
+		}
+		else {	
+			Write-Error "$RemoteHost is not HostName or IP !" 
+			break	
+		}
+	}
 }
+
+    # $ip=[system.net.dns]::resolve("localhost")
+    # Test-Connection $ip -IPv4 -ResolveDestination -Quiet -Count 1
+    # $store_name = $host.UI.RawUI.WindowTitle
+    # $host.UI.RawUI.WindowTitle = "ssh: $RemoteHost <> "
+    # ssh -t $RemoteHost tmux
+    # $host.UI.RawUI.WindowTitle = $store_name 
+# }
+
+function _termscp () {
+    Param (
+        [string]$RemoteHost = "127.0.0.1",
+        [string]$LocalPath = "D:\temp"
+    )
+    $RemoteHost =( [system.net.dns]::GetHostEntry($RemoteHost).HostName ).split('.')[0]
+    $store_name = $host.UI.RawUI.WindowTitle
+    $host.UI.RawUI.WindowTitle = "scp: $RemoteHost <> $LocalPath "
+    termscp $RemoteHost $LocalPath
+    $host.UI.RawUI.WindowTitle = $store_name 
+}
+
+
 function _vnc () {
     Param (
-        # [string]$RemoteUser = "admlinux",
-        [string]$RemoteHost = "10.1.33.7",
+        [string]$RemoteHost = "127.0.0.1",
         [int]$RemotePort = "5900"
     )
-    $RemoteHost = [System.Net.Dns]::GetHostAddresses($RemoteHost)[0]
+    $RemoteHost =( [system.net.dns]::GetHostEntry($RemoteHost).HostName ).split('.')[0]
     $OpenPorts = (Get-NetTCPConnection).LocalPort
     $LocalPort = 0
     While ($LocalPort -eq 0) {
@@ -107,16 +159,12 @@ function _vnc () {
         Param($LocalPort, $RemotePort, $RemoteHost )
         $_ssh = $LocalPort, 'localhost', $RemotePort -join ':'
         $_vnc = 'localhost', $LocalPort -join ':'
-        $sshProcessID = Start-Process -PassThru  -FilePath "$env:MINGW\ssh.exe" -ArgumentList @('-L', $_ssh , $RemoteHost)
-        Start-Sleep -Seconds 2
-        Start-Process -Wait -FilePath "$env:XDG_APP\bin\unvcviewer.exe" -ArgumentList @('-connect', $_vnc)
-        Start-Sleep -Seconds 2
+        $sshProcessID = Start-Process -PassThru ssh -ArgumentList @('-L', $_ssh , $RemoteHost) -WindowStyle hidden
+        Start-Process -Wait uvnc -ArgumentList @('-connect', $_vnc) 
         Stop-Process $sshProcessID
-        Start-Sleep -Seconds 2
         Exit
     }
-    Start-Process pwsh -ArgumentList @('-NoExit', '-nologo', '-noprofile', "-command & { $command } $LocalPort $RemotePort $RemoteHost")
-    # | Out-Null
+    Start-Process pwsh -ArgumentList @('-NoExit', '-nologo', '-noprofile', "-command & { $command } $LocalPort $RemotePort $RemoteHost") -WindowStyle hidden | Out-Null
 }
 
 function _uvnc () {
@@ -143,7 +191,23 @@ function _uvnc () {
     }
 }
 
-Register-ArgumentCompleter -CommandName ssh, scp, sftp, _termscp, _vnc -Native -ScriptBlock {
+Register-ArgumentCompleter -CommandName ssh,scp,sftp -Native -ScriptBlock {
+	param($wordToComplete, $commandAst, $cursorPosition)
+	$sshConfigFile = "$env:HOME\.ssh\config"
+    if (Test-Path $sshConfigFile) {
+        Get-Content $sshConfigFile | 
+        Where-Object {$_ -match "^Host" -and $_.Split()[1] -like "$wordToComplete*"} |
+        ForEach-Object {$_.Split()[1]} |
+        Sort-Object -Unique |
+        ForEach-Object {
+            [System.Management.Automation.CompletionResult]::new($_, $_, 'ParameterValue', $_)
+        }
+    } else {
+        return @()
+    }
+}
+
+Register-ArgumentCompleter -CommandName ssh, scp, sftp, _termscp, _vnc, _ssh -Native -ScriptBlock {
     param($wordToComplete, $commandAst, $cursorPosition)
 
     function Get-SSHHostList($sshConfigPath) {
@@ -154,53 +218,105 @@ Register-ArgumentCompleter -CommandName ssh, scp, sftp, _termscp, _vnc -Native -
         | Sort-Object -Unique `
         | Select-String -Pattern '^.*[*!?].*$' -NotMatch
     }
-    function Get-SSHConfigFileList ($sshConfigFilePath) {
-        $sshConfigDir = Split-Path -Path $sshConfigFilePath -Resolve -Parent
 
-        $sshConfigFilePaths = @()
-        $sshConfigFilePaths += $sshConfigFilePath
+    function Get-SSHKnownHost($sshKnownHostsPath) {
+       Get-Content -Path $sshKnownHostsPath `
+       | ForEach-Object { $_.split(' ')[0] } `
+       | Sort-Object -Unique
+     }
+   
+    # function Get-SSHConfigFileList ($sshConfigFilePath) {
+        # $sshConfigDir = Split-Path -Path $sshConfigFilePath -Resolve -Parent
+        # $sshConfigFilePaths = @()
+        # $sshConfigFilePaths += $sshConfigFilePath
+        # $pathsPatterns = @()
+        # Get-Content -Path $sshConfigFilePath `
+        # | Select-String -Pattern '^Include ' `
+        # | ForEach-Object { $_ -replace 'Include ', '' }  `
+        # | ForEach-Object { $_ -replace '~', $Env:USERPROFILE } `
+        # | ForEach-Object { $_ -replace '\$Env:USERPROFILE', $Env:USERPROFILE } `
+        # | ForEach-Object { $_ -replace '\$Env:HOMEPATH', $Env:USERPROFILE } `
+        # | ForEach-Object {
+            # $sshConfigFilePaths += $(Get-ChildItem -Path $sshConfigDir\$_ -File -ErrorAction SilentlyContinue -Force).FullName `
+            # | ForEach-Object { Get-SSHConfigFileList $_ }
+        # }
 
-        $pathsPatterns = @()
-        Get-Content -Path $sshConfigFilePath `
-        | Select-String -Pattern '^Include ' `
-        | ForEach-Object { $_ -replace 'Include ', '' }  `
-        | ForEach-Object { $_ -replace '~', $Env:USERPROFILE } `
-        | ForEach-Object { $_ -replace '\$Env:USERPROFILE', $Env:USERPROFILE } `
-        | ForEach-Object { $_ -replace '\$Env:HOMEPATH', $Env:USERPROFILE } `
-        | ForEach-Object {
-            $sshConfigFilePaths += $(Get-ChildItem -Path $sshConfigDir\$_ -File -ErrorAction SilentlyContinue -Force).FullName `
-            | ForEach-Object { Get-SSHConfigFileList $_ }
-        }
+        # if (($sshConfigFilePaths.Length -eq 1) -and ($sshConfigFilePaths.item(0) -eq $sshConfigFilePath) ) {
+            # return $sshConfigFilePath
+        # }
 
-        if (($sshConfigFilePaths.Length -eq 1) -and ($sshConfigFilePaths.item(0) -eq $sshConfigFilePath) ) {
-            return $sshConfigFilePath
-        }
+        # return $sshConfigFilePaths | Sort-Object -Unique
+    # }
 
-        return $sshConfigFilePaths | Sort-Object -Unique
-    }
-
-    $sshPath = "$Env:USERPROFILE\.ssh"
+    $sshPath = "$Env:HOME\.ssh"
     $hosts = Get-SSHConfigFileList "$sshPath\config" `
-    | ForEach-Object { Get-SSHHostList $_ } `
-        # For now just assume it's a hostname.
-        $textToComplete = $wordToComplete
+    $hosts = Get-SSHKnownHost "$env:HOME\.ssh\known_hosts" 
+    
+    $hosts = ForEach-Object { Get-SSHHostList "$sshPath\config" } `
+    # For now just assume it's a hostname.
+    $textToComplete = $wordToComplete
     $generateCompletionText = {
-        param($x)
+      param($x)
         $x
-    }
+     }
+
     if ($wordToComplete -match "^(?<user[-\w/\\]+)@(?<host[-.\w]+)$") {
-        $textToComplete = $Matches["host"]
-        $generateCompletionText = {
-            param($hostname)
-            $Matches["user"] + "@" + $hostname
-        }
+      $textToComplete = $Matches["host"]
+      $generateCompletionText = {
+        param($hostname)
+        $Matches["user"] + "@" + $hostname
+      }
     }
 
-    $hosts `
-    | Where-Object { $_ -like "${textToComplete}*" } `
-    | ForEach-Object { [CompletionResult]::new((&$generateCompletionText($_)), $_, [CompletionResultType]::ParameterValue, $_) }
+    # $hosts `
+    # | Where-Object { $_ -like "${textToComplete}*" } `
+    # | ForEach-Object { [CompletionResult]::new((&$generateCompletionText($_)), $_, [CompletionResultType]::ParameterValue, $_) }
 
 }
+
+# function GetKnonwHost (){
+ # [regex]$rx = "(?<host>^\S+?)((?=:))?((?<=:)(?<port>\d+))?(,(?<address>\S+))?\s(?<type>[\w-]+)\s(?<thumbprint>.*)"
+    # $known = "~\.ssh\known_hosts"
+    # Write-Verbose "Testing for $known"
+    # if (Test-Path $known) {
+        # $content = (Get-Content -Path $known) -split "`n"
+        # Write-Verbose "Found $($content.count) entries"
+
+        # #process all entries even if searching for a single hostname because there
+        # #might be multiple entries
+        # foreach ($entry in $content) {
+            # $matched = $rx.Match($entry)
+            # $sshHost = $matched.groups["host"].value -replace ":$|\[|\]", ""
+            # $IP = $matched.groups["address"].value -replace "\[|\]", ""
+            # Write-Verbose "Processing $sshHost"
+            # } #foreach entry
+            # #regex named captures are case-sensitive
+            # #I haven't perfected the regex capture so I'll manually trim and trailing : in the hostname capture
+            # $obj = [pscustomobject]@{
+                # PSTypeName = "sshKnownHost"
+                # Hostname   = $sshHost
+                # Port       = $matched.groups["port"].value
+                # Address    = $IP
+                # Keytype    = $matched.groups["type"].value
+                # Thumbprint = $matched.groups["thumbprint"].value
+            # }            #add each new object to the list
+            # $data.Add($obj)
+        # } #foreach entry
+    # }
+
+# }
+
+# Register-ArgumentCompleter -CommandName 'ssh', 'scp', 'sftp' -Native -ScriptBlock {
+  # param($wordToComplete, $commandAst, $cursorPosition)
+   
+
+
+  # if ($wordToComplete -match '^(?<user>[-\w/\\]+)@(?<host>[-.\w]+)$') {
+    # $hosts | Where-Object { $_ -like "$($Matches['host'].ToString())*" } `
+    # | ForEach-Object { "$($Matches['user'].ToString())@$_" }
+  # }
+# }
+
 
 # Register-ArgumentCompleter -Native -CommandName winget -ScriptBlock {
 # param($wordToComplete, $commandAst, $cursorPosition)
